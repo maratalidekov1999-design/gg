@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Django Messenger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <style>
+        .message-container {
+            scroll-behavior: smooth;
+        }
+        .message-input:focus {
+            outline: none;
+        }
+        .typing-indicator:after {
+            content: '...';
+            animation: typing 1.5s infinite;
+        }
+        @keyframes typing {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+
+        /* Анимация появления сообщения */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Темная тема */
+        @media (prefers-color-scheme: dark) {
+            body.dark {
+                background-color: #1a202c;
+                color: #e2e8f0;
+            }
+            .dark .chat-container {
+                background-color: #2d3748;
+            }
+            .dark .message-in {
+                background-color: #4a5568;
+                color: white;
+            }
+            .dark .message-out {
+                background-color: #3182ce;
+                color: white;
+            }
+        }
+
+        .notification {
+            animation: slideIn 0.5s forwards, slideOut 0.5s forwards 2.5s;
+        }
+        @keyframes slideIn {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateY(0); opacity: 1; }
+            to { transform: translateY(100%); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen bg-gray-100 dark:bg-gray-900">
+    <!-- Навбар -->
+    <nav class="bg-blue-600 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">Django Messenger</h1>
+            <div class="flex items-center space-x-4">
+                <span id="username" class="font-medium"></span>
+                <button id="logoutBtn" class="bg-red-500 hover:bg-red-700 px-3 py-1 rounded">
+                    Выйти
+                </button>
+                <button id="themeToggle" class="p-1 rounded-full bg-gray-700 text-white">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Основной контейнер -->
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Список чатов -->
+        <div id="chatsList" class="w-1/4 bg-white dark:bg-gray-800 border-r dark:border-gray-700 overflow-y-auto hidden md:block">
+            <div class="p-4 border-b dark:border-gray-700">
+                <input type="text" id="searchContact" placeholder="Поиск..."
+                       class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+            </div>
+            <ul id="contacts" class="divide-y dark:divide-gray-700">
+                <!-- Контакты будут загружены здесь -->
+            </ul>
+        </div>
+
+        <!-- Чат -->
+        <div class="flex-1 flex flex-col">
+            <div id="chatHeader" class="bg-white dark:bg-gray-800 p-4 border-b dark:border-gray-700 flex items-center">
+                <div class="flex items-center">
+                    <img src="https://placehold.co/40x40" alt="Аватар текущего пользователя чата"
+                         class="w-10 h-10 rounded-full mr-3">
+                    <div>
+                        <h2 id="currentChatName" class="font-bold text-lg dark:text-white">Выберите чат</h2>
+                        <p id="typingIndicator" class="text-xs text-gray-500 dark:text-gray-400 hidden">
+                            <span class="typing-indicator">печатает</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Сообщения -->
+            <div id="messagesContainer" class="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-700 message-container">
+                <div id="messages" class="space-y-3">
+                    <div class="text-center py-10 text-gray-500 dark:text-gray-400">
+                        <i class="fas fa-comments text-4xl mb-2"></i>
+                        <p>Выберите чат для начала общения</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ввод сообщения -->
+            <div class="bg-white dark:bg-gray-800 p-4 border-t dark:border-gray-700">
+                <div class="flex items-center">
+                    <button id="attachBtn" class="p-2 text-gray-500 hover:text-blue-500">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <div class="flex-1 mx-2">
+                        <input type="text" id="messageInput" placeholder="Введите сообщение..."
+                               class="w-full p-2 border rounded-full message-input dark:bg-gray-700 dark:border-gray-600">
+                    </div>
+                    <button id="sendBtn" class="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div id="notification" class="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg hidden notification"></div>
+
+    <!-- Модальное окно аутентификации -->
+    <div id="authModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h2 class="text-xl font-bold mb-4 dark:text-white">Вход в систему</h2>
+            <form id="loginForm">
+                <div class="mb-4">
+                    <label for="loginUsername" class="block mb-2 dark:text-gray-300">Имя пользователя</label>
+                    <input type="text" id="loginUsername" required
+                           class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <div class="mb-6">
+                    <label for="loginPassword" class="block mb-2 dark:text-gray-300">Пароль</label>
+                    <input type="password" id="loginPassword" required
+                           class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded">
+                    Войти
+                </button>
+            </form>
+            <div class="mt-4 text-center">
+                <p class="dark:text-gray-300">Нет аккаунта? <a href="#" id="showRegister" class="text-blue-500">Зарегистрироваться</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно регистрации -->
+    <div id="registerModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h2 class="text-xl font-bold mb-4 dark:text-white">Регистрация</h2>
+            <form id="registerForm">
+                <div class="mb-4">
+                    <label for="registerUsername" class="block mb-2 dark:text-gray-300">Имя пользователя</label>
+                    <input type="text" id="registerUsername" required
+                           class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <div class="mb-4">
+                    <label for="registerEmail" class="block mb-2 dark:text-gray-300">Email</label>
+                    <input type="email" id="registerEmail" required
+                           class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <div class="mb-6">
+                    <label for="registerPassword" class="block mb-2 dark:text-gray-300">Пароль</label>
+                    <input type="password" id="registerPassword" required
+                           class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded">
+                    Зарегистрироваться
+                </button>
+            </form>
+            <div class="mt-4 text-center">
+                <p class="dark:text-gray-300">Уже есть аккаунт? <a href="#" id="showLogin" class="text-blue-500">Войти</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Состояние приложения
+        const state = {
+            currentUser: null,
+            currentChat: null,
+            contacts: [],
+            messages: {},
+            socket: null,
+            isDarkMode: localStorage.getItem('darkMode') === 'true' || (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        };
+
+        // DOM элементы
+        const dom = {
+            authModal: document.getElementById('authModal'),
+            registerModal: document.getElementById('registerModal'),
+            loginForm: document.getElementById('loginForm'),
+            registerForm: document.getElementById('registerForm'),
+            showRegister: document.getElementById('showRegister'),
+            showLogin: document.getElementById('showLogin'),
+            logoutBtn: document.getElementById('logoutBtn'),
+            username: document.getElementById('username'),
+            chatsList: document.getElementById('chatsList'),
+            contacts: document.getElementById('contacts'),
+            currentChatName: document.getElementById('currentChatName'),
+            messagesContainer: document.getElementById('messagesContainer'),
+            messages: document.getElementById('messages'),
+            typingIndicator: document.getElementById('typingIndicator'),
+            messageInput: document.getElementById('messageInput'),
+            sendBtn: document.getElementById('sendBtn'),
+            attachBtn: document.getElementById('attachBtn'),
+            searchContact: document.getElementById('searchContact'),
+            themeToggle: document.getElementById('themeToggle'),
+            notification: document.getElementById('notification')
+        };
+
+        // Инициализация приложения
+        function init() {
+            setupEventListeners();
+            checkAuth();
+            setupTheme();
+
+            // Проверка поддержки WebSocket
+            if (!window.WebSocket) {
+                showNotification('Ваш браузер не поддерживает WebSocket', 'error');
+            }
+        }
+
+        // Настройка обработчиков событий
+        function setupEventListeners() {
+            // Формы аутентификации
+            dom.loginForm.addEventListener('submit', handleLogin);
+            dom.registerForm.addEventListener('submit', handleRegister);
+            dom.showRegister.addEventListener('click', (e) => {
+                e.preventDefault();
+                dom.authModal.classList.add('hidden');
+                dom.registerModal.classList.remove('hidden');
+            });
+            dom.showLogin.addEventListener('click', (e) => {
+                e.preventDefault();
+                dom.registerModal.classList.add('hidden');
+                dom.authModal.classList.remove('hidden');
+            });
+
+            // Кнопка выхода
+            dom.logoutBtn.addEventListener('click', handleLogout);
+
+            // Отправка сообщения
+            dom.sendBtn.addEventListener('click', handleSendMessage);
+            dom.messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleSendMessage();
+                }
+            });
+
+            // Ввод сообщения (для индикатора набора)
+            dom.messageInput.addEventListener('input', () => {
+                if (state.socket && state.currentChat) {
+                    sendTypingIndicator();
+                }
+            });
+
+            // Поиск контактов
+            dom.searchContact.addEventListener('input', () => {
+                const searchTerm = dom.searchContact.value.toLowerCase();
+                Array.from(dom.contacts.children).forEach(contact => {
+                    const name = contact.textContent.toLowerCase();
+                    if (name.includes(searchTerm)) {
+                        contact.classList.remove('hidden');
+                    } else {
+                        contact.classList.add('hidden');
+                    }
+                });
+            });
+
+            // Переключение темы
+            dom.themeToggle.addEventListener('click', toggleTheme);
+
+            // Переключение чатов (для мобильных устройств)
+            if (window.innerWidth < 768) {
+                dom.messagesContainer.addEventListener('click', () => {
+                    dom.chatsList.classList.remove('hidden');
+                });
+            }
+        }
+
+        // Проверка аутентификации
+        function checkAuth() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                // Получение информации о пользователе
+                fetch('/api/auth/user/', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                })
+                .then(response => response.json())
+                .then(user => {
+                    state.currentUser = user;
+                    dom.username.textContent = user.username;
+                    dom.authModal.classList.add('hidden');
+                    loadContacts();
+                    connectWebSocket();
+                })
+                .catch(error => {
+                    console.error('Ошибка при проверке аутентификации:', error);
+                    localStorage.removeItem('token');
+                    dom.authModal.classList.remove('hidden');
+                });
+            } else {
+                dom.authModal.classList.remove('hidden');
+            }
+        }
+
+        // Обработчик входа
+        function handleLogin(e) {
+            e.preventDefault();
+            const username = dom.loginUsername.value;
+            const password = dom.loginPassword.value;
+
+            fetch('/api/auth/login/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.token) {
+                    localStorage.setItem('token', data.token);
+                    checkAuth();
+                } else {
+                    showNotification(data.message || 'Ошибка входа', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Ошибка при входе', 'error');
+                console.error('Ошибка:', error);
+            });
+        }
+
+        // Обработчик регистрации
+        function handleRegister(e) {
+            e.preventDefault();
+            const username = dom.registerUsername.value;
+            const email = dom.registerEmail.value;
+            const password = dom.registerPassword.value;
+
+            fetch('/api/auth/register/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, email, password })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.token) {
+                    localStorage.setItem('token', data.token);
+                    checkAuth();
+                    dom.registerModal.classList.add('hidden');
+                } else {
+                    showNotification(data.message || 'Ошибка регистрации', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Ошибка при регистрации', 'error');
+                console.error('Ошибка:', error);
+            });
+        }
+
+        // Обработчик выхода
+        function handleLogout() {
+            localStorage.removeItem('token');
+            state.currentUser = null;
+            state.currentChat = null;
+            state.contacts = [];
+            state.messages = {};
+
+            if (state.socket) {
+                state.socket.close();
+                state.socket = null;
+            }
+
+            checkAuth();
+
+            // Очистка интерфейса
+            dom.username.textContent = '';
+            dom.contacts.innerHTML = '';
+            dom.messages.innerHTML = `
+                <div class="text-center py-10 text-gray-500 dark:text-gray-400">
+                    <i class="fas fa-comments text-4xl mb-2"></i>
+                    <p>Выберите чат для начала общения</p>
+                </div>
+            `;
+            dom.currentChatName.textContent = 'Выберите чат';
+        }
+
+        // Загрузка контактов
+        function loadContacts() {
+            fetch('/api/contacts/', {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                state.contacts = data;
+                renderContacts();
+            })
+            .catch(error => {
+                console.error('Ошибка при загрузке контактов:', error);
+                showNotification('Ошибка загрузки контактов', 'error');
+            });
+        }
+
+        // Отображение контактов
+        function renderContacts() {
+            dom.contacts.innerHTML = '';
+
+            state.contacts.forEach(contact => {
+                const li = document.createElement('li');
+                li.className = 'p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer';
+                li.innerHTML = `
+                    <div class="flex items-center">
+                        <img src="https://placehold.co/40x40" alt="Аватар пользователя ${contact.username}"
+                             class="w-10 h-10 rounded-full mr-3">
+                        <div>
+                            <h3 class="font-medium dark:text-white">${contact.username}</h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">${contact.last_message || 'Нет сообщений'}</p>
+                        </div>
+                    </div>
+                `;
+
+                li.addEventListener('click', () => {
+                    state.currentChat = contact.id;
+                    dom.currentChatName.textContent = contact.username;
+                    loadMessages(contact.id);
+
+                    if (window.innerWidth < 768) {
+                        dom.chatsList.classList.add('hidden');
+                    }
+                });
+
+                dom.contacts.appendChild(li);
+            });
+        }
+
+        // Загрузка сообщений
+        function loadMessages(chatId) {
+            fetch(`/api/messages/${chatId}/`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                state.messages[chatId] = data;
+                renderMessages(chatId);
+
+                // Прокрутка вниз после загрузки сообщений
+                setTimeout(() => {
+                    dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+                }, 100);
+            })
+            .catch(error => {
+                console.error('Ошибка при загрузке сообщений:', error);
+                showNotification('Ошибка загрузки сообщений', 'error');
+            });
+        }
+
+        // Отображение сообщений
+        function renderMessages(chatId) {
+            dom.messages.innerHTML = '';
+
+            if (!state.messages[chatId] || state.messages[chatId].length === 0) {
+                dom.messages.innerHTML = `
+                    <div class="text-center py-10 text-gray-500 dark:text-gray-400">
+                        <i class="fas fa-comments text-4xl mb-2"></i>
+                        <p>Нет сообщений</p>
+                    </div>
+                `;
+                return;
+            }
+
+            state.messages[chatId].forEach(message => {
+                const isCurrentUser = message.sender === state.currentUser.id;
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`;
+
+                messageDiv.innerHTML = `
+                    <div class="message max-w-xs md:max-w-md lg:max-w-lg rounded-lg p-3 ${isCurrentUser ? 'message-out bg-blue-500 text-white' : 'message-in bg-gray-200 dark:bg-gray-600 dark:text-white'}">
+                        <div class="flex items-end mb-1">
+                            ${!isCurrentUser ? `
+                                <span class="font-bold mr-2">${getContactName(message.sender)}</span>
+                            ` : ''}
+                            <span class="text-xs opacity-70">${formatTime(message.timestamp)}</span>
+                        </div>
+                        <p>${message.content}</p>
+                    </div>
+                `;
+
+                dom.messages.appendChild(messageDiv);
+            });
+        }
+
+        // Подключение WebSocket
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const host = window.location.host;
+            const path = '/ws/';
+
+            state.socket = new WebSocket(`${protocol}${host}${path}?token=${localStorage.getItem('token')}`);
+
+            state.socket.onopen = () => {
+                console.log('WebSocket соединение установлено');
+            };
+
+            state.socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleSocketMessage(data);
+            };
+
+            state.socket.onclose = () => {
+                console.log('WebSocket соединение закрыто');
+                // Попытка переподключения через 5 секунд
+                setTimeout(() => {
+                    if (state.currentUser) {
+                        connectWebSocket();
+                    }
+                }, 5000);
+            };
+
+            state.socket.onerror = (error) => {
+                console.error('WebSocket ошибка:', error);
+            };
+        }
+
+        // Обработка сообщений WebSocket
+        function handleSocketMessage(data) {
+            switch (data.type) {
+                case 'message':
+                    // Новое сообщение
+                    handleNewMessage(data.message);
+                    break;
+                case 'typing':
+                    // Индикатор набора сообщения
+                    handleTypingIndicator(data);
+                    break;
+                case 'notification':
+                    // Уведомление
+                    showNotification(data.message, data.level);
+                    break;
+                default:
+                    console.log('Неизвестный тип сообщения:', data);
+            }
+        }
+
+        // Обработка нового сообщения
+        function handleNewMessage(message) {
+            const chatId = message.chat_id;
+
+            // Добавляем сообщение в кеш
+            if (!state.messages[chatId]) {
+                state.messages[chatId] = [];
+            }
+            state.messages[chatId].push(message);
+
+            // Если это текущий открытый чат - обновляем интерфейс
+            if (state.currentChat === chatId) {
+                renderMessages(chatId);
+
+                // Прокрутка вниз
+                setTimeout(() => {
+                    dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+                }, 100);
+            } else {
+                // Показываем уведомление
+                const contact = state.contacts.find(c => c.id === chatId);
+                if (contact) {
+                    showNotification(`Новое сообщение от ${contact.username}: ${message.content.substring(0, 30)}...`);
+
+                    // Обновляем последнее сообщение в списке контактов
+                    contact.last_message = message.content;
+                    renderContacts();
+                }
+            }
+        }
+
+        // Обработка индикатора набора
+        function handleTypingIndicator(data) {
+            if (data.chat_id === state.currentChat) {
+                const isTyping = data.is_typing;
+                if (isTyping) {
+                    const contact = state.contacts.find(c => c.id === data.chat_id);
+                    dom.typingIndicator.querySelector('span').textContent = `${contact.username} печатает`;
+                    dom.typingIndicator.classList.remove('hidden');
+                } else {
+                    dom.typingIndicator.classList.add('hidden');
+                }
+            }
+        }
+
+        // Отправка сообщения
+        function handleSendMessage() {
+            const content = dom.messageInput.value.trim();
+            if (!content || !state.currentChat) return;
+
+            const message = {
+                chat_id: state.currentChat,
+                content
+            };
+
+            // Отправка через WebSocket
+            if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                state.socket.send(JSON.stringify({
+                    type: 'message',
+                    message
+                }));
+            } else {
+                // Фолбэк: отправка через HTTP
+                fetch('/api/messages/send/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify(message)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showNotification(data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка при отправке сообщения:', error);
+                    showNotification('Ошибка при отправке сообщения', 'error');
+                });
+            }
+
+            // Очистка поля ввода
+            dom.messageInput.value = '';
+        }
+
+        // Отправка индикатора набора
+        function sendTypingIndicator() {
+            if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                state.socket.send(JSON.stringify({
+                    type: 'typing',
+                    chat_id: state.currentChat,
+                    is_typing: true
+                }));
+
+                // Через 2 секунды отправляем отключение индикатора
+                setTimeout(() => {
+                    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                        state.socket.send(JSON.stringify({
+                            type: 'typing',
+                            chat_id: state.currentChat,
+                            is_typing: false
+                        }));
+                    }
+                }, 2000);
+            }
+        }
+
+        // Показ уведомления
+        function showNotification(message, level = 'info') {
+            dom.notification.textContent = message;
+            dom.notification.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg notification`;
+
+            if (level === 'error') {
+                dom.notification.classList.add('bg-red-500');
+            } else if (level === 'warning') {
+                dom.notcription.classList.add('bg-yellow-500');
+            } else {
+                dom.notification.classList.add('bg-blue-500');
+            }
+
+            dom.notification.classList.remove('hidden');
+
+            setTimeout(() => {
+                dom.notification.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Получение имени контакта по ID
+        function getContactName(contactId) {
+            const contact = state.contacts.find(c => c.id === contactId);
+            return contact ? contact.username : 'Неизвестный';
+        }
+
+        // Форматирование времени
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // Темная тема
+        function setupTheme() {
+            if (state.isDarkMode) {
+                document.body.classList.add('dark');
+                dom.themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+            } else {
+                document.body.classList.remove('dark');
+                dom.themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+            }
+        }
+
+        function toggleTheme() {
+            state.isDarkMode = !state.isDarkMode;
+            localStorage.setItem('darkMode', state.isDarkMode);
+            setupTheme();
+        }
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
+
